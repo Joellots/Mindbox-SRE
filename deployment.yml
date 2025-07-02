@@ -1,0 +1,98 @@
+# Определение Deployment для веб-приложения
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web-app
+  labels:
+    app: web-app
+spec:
+  replicas: 4 # Устанавливаем 4 реплики для обработки пиковой нагрузки, согласно тесту
+  selector:
+    matchLabels:
+      app: web-app
+  template:
+    metadata:
+      labels:
+        app: web-app
+    spec:
+      # Анти-афинитет для распределения подов по разным узлам для повышения отказоустойчивости
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100 # Приоритетное распределение по узлам
+            podAffinityTerm:
+              labelSelector:
+                matchLabels:
+                  app: web-app
+              topologyKey: kubernetes.io/hostname
+      # Ограничения топологии для равномерного распределения подов по трем зонам
+      topologySpreadConstraints:
+      - maxSkew: 1 # Максимальный дисбаланс в количестве подов между зонами
+        topologyKey: topology.kubernetes.io/zone
+        whenUnsatisfiable: DoNotSchedule # Не размещать, если зоны недоступны
+        labelSelector:
+          matchLabels:
+            app: web-app
+      containers:
+      - name: web-app
+        image: nginx:latest # Предполагается, что nginx обслуживает статические файлы React
+        resources:
+          requests:
+            cpu: "100m" # Запрос 0.1 CPU для стабильной работы
+            memory: "128Mi" # Постоянное потребление памяти 128 МБ
+          limits:
+            cpu: "500m" # Лимит CPU 0.5 для обработки начальных запросов
+            memory: "128Mi" # Лимит памяти фиксирован на 128 МБ
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 80
+          initialDelaySeconds: 10 # Задержка 10 секунд для инициализации (5-10 секунд)
+          periodSeconds: 5 # Проверка готовности каждые 5 секунд
+        ports:
+        - containerPort: 80 # Порт для веб-приложения
+---
+# Определение сервиса для доступа к приложению
+apiVersion: v1
+kind: Service
+metadata:
+  name: web-app-service
+spec:
+  selector:
+    app: web-app
+  ports:
+  - protocol: TCP
+    port: 80
+    targetPort: 80
+  type: ClusterIP # Внутренний сервис для простоты (можно добавить Ingress для внешнего доступа)
+---
+# HorizontalPodAutoscaler для автоматического масштабирования по загрузке CPU
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: web-app-hpa
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: web-app
+  minReplicas: 2 # Минимально 2 пода ночью для экономии ресурсов
+  maxReplicas: 6 # Максимум 6 подов для пиковой нагрузки
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 80 # Масштабирование при использовании CPU выше 80%
+---
+# PodDisruptionBudget для обеспечения доступности при сбоях
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: web-app-pdb
+spec:
+  minAvailable: 3 # Минимум 3 пода должны быть доступны во время сбоев
+  selector:
+    matchLabels:
+      app: web-app

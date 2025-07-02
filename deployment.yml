@@ -64,7 +64,7 @@ spec:
   - protocol: TCP
     port: 80
     targetPort: 80
-  type: ClusterIP # Внутренний сервис для простоты (можно добавить Ingress для внешнего доступа)
+  type: ClusterIP # Внутренний сервис для простоты (следует добавить Ingress для внешнего доступа)
 ---
 # HorizontalPodAutoscaler для автоматического масштабирования по загрузке CPU
 apiVersion: autoscaling/v2
